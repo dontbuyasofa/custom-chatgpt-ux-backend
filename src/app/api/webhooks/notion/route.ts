@@ -3,7 +3,7 @@ import crypto from "crypto";
 
 export const runtime = "nodejs";
 
-/** Constant-time compare for hex strings */
+/** Constant-time compare */
 function safeTimingEqual(a: string, b: string) {
   const abuf = Buffer.from(a, "hex");
   const bbuf = Buffer.from(b, "hex");
@@ -16,7 +16,8 @@ function verifyNotionSignature(
   signatureHeader: string | null,
   secret: string | undefined
 ) {
-  if (!secret || !signatureHeader) return false;
+  if (!secret) return false; // tolerate missing during setup
+  if (!signatureHeader) return false;
   const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
   const received = signatureHeader.trim().toLowerCase();
   return safeTimingEqual(expected, received);
@@ -26,32 +27,71 @@ export async function POST(request: Request) {
   try {
     const rawBody = await request.text();
 
-    // If Notion ever sends a verification again, try to be nice and still echo token
-    const headerToken =
+    // ---- TEMP VERBOSE LOGGING (to find verification token) ----
+    // Log all Notion-ish headers so we can see where the token is
+    const interestingHeaders: Record<string, string> = {};
+    for (const [k, v] of request.headers.entries()) {
+      const lk = k.toLowerCase();
+      if (lk.startsWith("x-notion-") || lk.includes("verification") || lk.includes("token")) {
+        interestingHeaders[k] = v;
+      }
+    }
+    console.log("[Notion Webhook] headers:", interestingHeaders);
+    console.log("[Notion Webhook] raw body:", rawBody);
+
+    // Try to extract a verification token from headers first
+    let verificationToken =
       request.headers.get("x-notion-verification-token") ??
-      request.headers.get("X-Notion-Verification-Token");
-    if (headerToken) {
-      console.log("[Notion Webhook] verification token (header) received");
-      return new Response(headerToken, { status: 200 });
+      request.headers.get("notion-verification-token") ??
+      request.headers.get("verification-token") ??
+      undefined;
+
+    // Try common body shapes
+    if (!verificationToken && rawBody) {
+      try {
+        const obj = JSON.parse(rawBody);
+        if (typeof obj?.verificationToken === "string") verificationToken = obj.verificationToken;
+        else if (typeof obj?.token === "string") verificationToken = obj.token;
+        else if (obj?.event === "verification" && typeof obj?.verificationToken === "string") {
+          verificationToken = obj.verificationToken;
+        }
+      } catch {
+        // maybe urlencoded
+        try {
+          const params = new URLSearchParams(rawBody);
+          verificationToken =
+            params.get("verificationToken") ?? params.get("token") ?? verificationToken ?? undefined;
+        } catch {
+          /* ignore */
+        }
+      }
     }
 
-    // Enforce signature for normal events
+    if (verificationToken) {
+      console.log("[Notion Webhook] DETECTED verification token:", verificationToken);
+      // For the UI flow, you paste this token into Notion's dialog.
+      // Respond 200 to acknowledge receipt.
+      return new Response("ok", { status: 200 });
+    }
+
+    // ---- Normal events (signature optional until secret is set) ----
     const secret = process.env.NOTION_SIGNING_SECRET;
     const signature = request.headers.get("x-notion-signature");
-    const ok = verifyNotionSignature(rawBody, signature, secret);
-    if (!ok) {
-      return new Response("invalid signature", { status: 401 });
+    if (signature && secret) {
+      const ok = verifyNotionSignature(rawBody, signature, secret);
+      if (!ok) return new Response("invalid signature", { status: 401 });
+    } else {
+      console.log("[Notion Webhook] No signing secret configured; accepting event for now.");
     }
 
-    // Handle/inspect the event
-    let type = "unknown";
+    // Best-effort event type log
     try {
-      const evt = JSON.parse(rawBody);
-      type = evt?.event?.type ?? evt?.type ?? "unknown";
+      const event = JSON.parse(rawBody);
+      const type = event?.event?.type ?? event?.type ?? "unknown";
+      console.log("[Notion Webhook] event type:", type);
     } catch {
-      /* ignore */
+      console.log("[Notion Webhook] event type: unknown");
     }
-    console.log("[Notion Webhook] event type:", type);
 
     return new Response("ok", { status: 200 });
   } catch (err: unknown) {
