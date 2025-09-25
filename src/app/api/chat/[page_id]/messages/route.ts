@@ -48,11 +48,13 @@ export async function POST(request: NextRequest, context: { params: { page_id: s
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (err: any) {
-    console.error("messages endpoint error:", err);
-    return new Response(JSON.stringify({ error: "server error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  } catch (err: unknown) {
+  const e = err instanceof Error ? err : new Error(String(err));
+  console.error("messages endpoint error:", e);
+  return new Response(JSON.stringify({ error: "server error" }), {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 }

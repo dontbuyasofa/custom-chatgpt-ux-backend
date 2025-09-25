@@ -39,8 +39,10 @@ export async function POST(request: NextRequest) {
     console.log("[Notion Webhook] payload keys:", Object.keys(event || {}));
 
     return new Response("ok", { status: 200 });
-  } catch (err: any) {
-    console.error("Webhook error:", err);
-    return new Response("server error", { status: 500 });
-  }
+  } catch (err: unknown) {
+  const e = err instanceof Error ? err : new Error(String(err));
+  console.error("Webhook error:", e);
+  return new Response("server error", { status: 500 });
+}
+
 }
