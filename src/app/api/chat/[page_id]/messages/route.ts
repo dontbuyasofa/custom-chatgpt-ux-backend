@@ -13,9 +13,12 @@ async function ensureConversationId(pageId: string): Promise<string> {
   return convId;
 }
 
-export async function POST(request: Request, { params }: { params: { page_id: string } }) {
+export async function POST(request: Request, context: unknown) {
   try {
+    // Safely extract params from unknown context
+    const { params } = (context as { params: { page_id: string } }) ?? { params: { page_id: "" } };
     const pageId = params.page_id;
+
     const body = await request.json().catch(() => ({}));
     const message: string | undefined = body?.message;
 
