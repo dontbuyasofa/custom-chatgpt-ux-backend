@@ -6,7 +6,10 @@ function toSSE(data: string) {
   return `data: ${data}\n\n`;
 }
 
-export async function GET(_request: Request, { params }: { params: { page_id: string } }) {
+export async function GET(_request: Request, context: unknown) {
+  // Safely extract params from unknown context
+  const { params } =
+    (context as { params: { page_id: string } }) ?? { params: { page_id: "" } };
   const pageId = params.page_id;
 
   const stream = new ReadableStream({
@@ -40,7 +43,8 @@ export async function GET(_request: Request, { params }: { params: { page_id: st
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
+      Connection: "keep-alive",
     },
   });
 }
+
