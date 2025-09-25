@@ -1,5 +1,4 @@
 // src/app/api/chat/[page_id]/stream/route.ts
-import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 
@@ -7,8 +6,8 @@ function toSSE(data: string) {
   return `data: ${data}\n\n`;
 }
 
-export async function GET(_request: NextRequest, context: { params: { page_id: string } }) {
-  const pageId = context.params.page_id;
+export async function GET(_request: Request, { params }: { params: { page_id: string } }) {
+  const pageId = params.page_id;
 
   const stream = new ReadableStream({
     start(controller) {
@@ -30,7 +29,9 @@ export async function GET(_request: NextRequest, context: { params: { page_id: s
       }, 1600);
 
       return () => {
-        clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
       };
     },
   });

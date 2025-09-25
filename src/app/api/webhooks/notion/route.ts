@@ -1,6 +1,5 @@
 // src/app/api/webhooks/notion/route.ts
 import crypto from "crypto";
-import { NextRequest } from "next/server";
 
 export const runtime = "nodejs"; // use Node runtime for crypto
 
@@ -11,7 +10,11 @@ function safeTimingEqual(a: string, b: string) {
   return crypto.timingSafeEqual(abuf, bbuf);
 }
 
-function verifyNotionSignature(rawBody: string, signatureHeader: string | null, secret: string | undefined) {
+function verifyNotionSignature(
+  rawBody: string,
+  signatureHeader: string | null,
+  secret: string | undefined
+) {
   if (!secret) throw new Error("Missing NOTION_SIGNING_SECRET");
   if (!signatureHeader) return false;
 
@@ -21,7 +24,7 @@ function verifyNotionSignature(rawBody: string, signatureHeader: string | null, 
   return safeTimingEqual(expected, received);
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const signature = request.headers.get("x-notion-signature");
     const rawBody = await request.text(); // keep raw body for verification
@@ -40,9 +43,9 @@ export async function POST(request: NextRequest) {
 
     return new Response("ok", { status: 200 });
   } catch (err: unknown) {
-  const e = err instanceof Error ? err : new Error(String(err));
-  console.error("Webhook error:", e);
-  return new Response("server error", { status: 500 });
+    const e = err instanceof Error ? err : new Error(String(err));
+    console.error("Webhook error:", e);
+    return new Response("server error", { status: 500 });
+  }
 }
 
-}

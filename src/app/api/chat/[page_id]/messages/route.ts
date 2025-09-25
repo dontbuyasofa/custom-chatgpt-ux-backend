@@ -1,5 +1,4 @@
 // src/app/api/chat/[page_id]/messages/route.ts
-import { NextRequest } from "next/server";
 import { getConversationIdForPage, setConversationIdForPage } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -14,9 +13,9 @@ async function ensureConversationId(pageId: string): Promise<string> {
   return convId;
 }
 
-export async function POST(request: NextRequest, context: { params: { page_id: string } }) {
+export async function POST(request: Request, { params }: { params: { page_id: string } }) {
   try {
-    const pageId = context.params.page_id;
+    const pageId = params.page_id;
     const body = await request.json().catch(() => ({}));
     const message: string | undefined = body?.message;
 
@@ -30,7 +29,6 @@ export async function POST(request: NextRequest, context: { params: { page_id: s
     const conversationId = await ensureConversationId(pageId);
 
     // --- STUB for OpenAI call ---
-    // Later:
     // import OpenAI from "openai";
     // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
     // await openai.responses.create({ ... with conversationId & user message ... });
@@ -49,12 +47,11 @@ export async function POST(request: NextRequest, context: { params: { page_id: s
       headers: { "Content-Type": "application/json" },
     });
   } catch (err: unknown) {
-  const e = err instanceof Error ? err : new Error(String(err));
-  console.error("messages endpoint error:", e);
-  return new Response(JSON.stringify({ error: "server error" }), {
-    status: 500,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
+    const e = err instanceof Error ? err : new Error(String(err));
+    console.error("messages endpoint error:", e);
+    return new Response(JSON.stringify({ error: "server error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 }
