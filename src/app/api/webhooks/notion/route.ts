@@ -1,8 +1,9 @@
 // src/app/api/webhooks/notion/route.ts
 import crypto from "crypto";
 
-export const runtime = "nodejs"; // use Node runtime for crypto
+export const runtime = "nodejs";
 
+/** Constant-time compare */
 function safeTimingEqual(a: string, b: string) {
   const abuf = Buffer.from(a, "hex");
   const bbuf = Buffer.from(b, "hex");
@@ -15,9 +16,8 @@ function verifyNotionSignature(
   signatureHeader: string | null,
   secret: string | undefined
 ) {
-  if (!secret) return false; // tolerate missing during local/dev
+  if (!secret) return false; // no secret configured => don't verify
   if (!signatureHeader) return false;
-
   const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
   const received = signatureHeader.trim().toLowerCase();
   return safeTimingEqual(expected, received);
@@ -25,74 +25,60 @@ function verifyNotionSignature(
 
 export async function POST(request: Request) {
   try {
-    // Read raw body once
     const rawBody = await request.text();
 
-    // --- 1) Handle Notion webhook verification (no signature expected) ---
-    // Notion may POST JSON like: { "event": "verification", "verificationToken": "..." }
-    // Be forgiving about formats.
-    let verificationToken: string | undefined;
+    // --- A) Notion verification: token can be sent via header or body ---
+    // Header (most reliable)
+    const headerToken =
+      request.headers.get("x-notion-verification-token") ??
+      request.headers.get("X-Notion-Verification-Token");
 
-    // Try JSON first
+    // Body (fallback; shape may vary)
+    let bodyToken: string | undefined;
     try {
       const obj = JSON.parse(rawBody);
-      if (typeof obj?.verificationToken === "string") {
-        verificationToken = obj.verificationToken;
-      } else if (
-        obj?.event === "verification" &&
-        typeof obj?.verificationToken === "string"
-      ) {
-        verificationToken = obj.verificationToken;
+      if (typeof obj?.verificationToken === "string") bodyToken = obj.verificationToken;
+      else if (typeof obj?.token === "string") bodyToken = obj.token;
+      else if (obj?.event === "verification" && typeof obj?.verificationToken === "string") {
+        bodyToken = obj.verificationToken;
       }
     } catch {
-      // not JSON; ignore
-    }
-
-    // Try URL-encoded: verificationToken=<value>
-    if (!verificationToken && rawBody && rawBody.includes("=")) {
-      try {
+      // if Notion ever posts form-encoded: verificationToken=<value>
+      if (!bodyToken && rawBody.includes("=")) {
         const params = new URLSearchParams(rawBody);
-        const p = params.get("verificationToken") || params.get("token");
-        if (p) verificationToken = p;
-      } catch {
-        // ignore
+        bodyToken = params.get("verificationToken") ?? params.get("token") ?? undefined;
       }
     }
 
-    // Last-resort regex (if Notion changes shape slightly)
-    if (!verificationToken) {
-      const m = rawBody.match(/verificationToken["']?\s*[:=]\s*["']?([^"'\s}]+)/i);
-      if (m) verificationToken = m[1];
-    }
-
+    const verificationToken = headerToken ?? bodyToken;
     if (verificationToken) {
-      console.log("[Notion Webhook] Verification received, echoing token");
-      return new Response(verificationToken, {
-        status: 200,
-        headers: { "Content-Type": "text/plain" },
-      });
+      console.log("[Notion Webhook] Verification token:", verificationToken);
+      // For Notion's UI flow you paste the token manually; just return 200 OK.
+      return new Response("ok", { status: 200 });
     }
 
-    // --- 2) Normal signed webhook events ---
+    // --- B) Normal signed events (tolerate missing secret during setup) ---
     const signature = request.headers.get("x-notion-signature");
-    const ok = verifyNotionSignature(
-      rawBody,
-      signature,
-      process.env.NOTION_SIGNING_SECRET
-    );
-    if (!ok) {
-      return new Response("invalid signature", { status: 401 });
+    const secret = process.env.NOTION_SIGNING_SECRET;
+
+    if (signature && secret) {
+      const ok = verifyNotionSignature(rawBody, signature, secret);
+      if (!ok) {
+        return new Response("invalid signature", { status: 401 });
+      }
+    } else {
+      // No secret configured yet — accept but log (useful during initial setup).
+      console.log("[Notion Webhook] No signing secret configured; accepting event for now.");
     }
 
-    // Parse and log event (best-effort)
-    let eventType = "unknown";
+    // Log event type for visibility
     try {
       const event = JSON.parse(rawBody);
-      eventType = event?.event?.type ?? event?.type ?? "unknown";
+      const type = event?.event?.type ?? event?.type ?? "unknown";
+      console.log("[Notion Webhook] event type:", type);
     } catch {
-      // ignore parse errors for non-verification payloads
+      /* ignore parse issues */
     }
-    console.log("[Notion Webhook] type:", eventType);
 
     return new Response("ok", { status: 200 });
   } catch (err: unknown) {
